@@ -498,6 +498,36 @@ void RenderSceneFromCamera(Camera* camera)
 
 //**************************
 bool skip = false;
+
+
+//this function calls the Draw() function to render the quad, but also switches the textures.
+void RenderAndReset()
+{
+	// ########### render and reset ############
+	//update buffers before rendering (so that shaders get up to date values)
+	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+	// draw the quad
+	gD3DContext->Draw(4, 0);
+	// unbind SRV, ready for next render
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+	//###########################################
+
+	//copy back
+	gD3DContext->OMSetRenderTargets(1, &gSceneRenderTarget, gDepthStencil);
+	gD3DContext->PSSetShader(gCopy_PostProcess, nullptr, 0);
+	gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV); // use postprocess texture as input
+
+	//update buffers before rendering (so that shaders get up to date values)
+	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+	// draw the quad
+	gD3DContext->Draw(4, 0);
+	// unbind SRV, ready for next render
+	gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+}
+
 // Run any scene post-processing steps
 void PostProcessing(float frameTime)
 {
@@ -547,34 +577,45 @@ void PostProcessing(float frameTime)
 	}
 	else if (gCurrentPostProcess == PostProcess::GaussianBlur)
 	{
-		// the first shader should render to the postProcess Render Target
+		// the first shader
 		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
-		// tint shader
-		gPostProcessingConstants.tintColour = { 0, 1, 1 };
-		gPostProcessingConstants.tintColour2 = { 1, 1, 0 };
-		gD3DContext->PSSetShader(gTintPostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use scene texture as input
-
-		// render
-		UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
-		gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
-		gD3DContext->Draw(4, 0);
-
-		// unbind SRV, ready for next render
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
-
-
-		// the second shader shoudl render ot the back buffer
-		gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
-		// blur shader
+		// blur vertically shader
 		gPostProcessingConstants.blurBellcurveStrength = blurCurve;
 		gPostProcessingConstants.blurRadius = blurStrength;
+		gD3DContext->PSSetShader(gGaussianBlurV_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(1, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(1, 1, &gPointSampler);
+
+
+		RenderAndReset();
+
+		// the second shader
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
+
+		// blur horizontally shader
 		gD3DContext->PSSetShader(gGaussianBlurH_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV); // use postprocess texture as input
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use postprocess texture as input
+
+		RenderAndReset();
+
+
+
+		//copy to back buffet
+		gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
+		gD3DContext->PSSetShader(gCopy_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use postprocess texture as input
+
+
+
+
+
+
+
 
 		gD3DContext->Draw(4, 0);
+
+
 
 
 
@@ -582,18 +623,6 @@ void PostProcessing(float frameTime)
 
 
 		skip = true;
-
-
-
-		//gD3DContext->PSSetShaderResources(slot, 1, pTexture0); // source
-		//gD3DContext->OMSetRenderTargets(1, pTexture1, 0);      // target
-		//gD3DContext->Draw(4,0);
-
-		//// Pass 2: from pTexture1 to pTexture2
-		//// ...set up pipeline state for Pass1 here...
-		//gD3DContext->PSSetShaderResources(slot, 1, pTexture1); // previous target is now source
-		//gD3DContext->OMSetRenderTargets(1, pTexture2, 0);
-		//gD3DContext->Draw(4,0);
 
 
 
@@ -666,11 +695,13 @@ void PostProcessing(float frameTime)
 		wiggle += wiggleSpeed * frameTime;
 	}
 
+	if (skip == false)
+	{
+		UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+		gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
 
-	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
-	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
-
-	gD3DContext->Draw( 4, 0);
+		gD3DContext->Draw(4, 0);
+	}
 
 
 	// These lines unbind the scene texture from the pixel shader to stop DirectX issuing a warning when we try to render to it again next frame

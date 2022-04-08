@@ -32,6 +32,7 @@ ID3D11PixelShader*  gBlur_PostProcess = nullptr;
 ID3D11PixelShader*  gPyramidBlur_PostProcess = nullptr;
 ID3D11PixelShader*  gGaussianBlurH_PostProcess = nullptr;
 ID3D11PixelShader*  gGaussianBlurV_PostProcess = nullptr;
+ID3D11PixelShader*  gCopy_PostProcess = nullptr;
 
 ID3D11PixelShader*  gUnderwater_PostProcess = nullptr;
 ID3D11PixelShader*  gNoise_PostProcess = nullptr;
@@ -63,6 +64,7 @@ bool LoadShaders()
 	gPyramidBlur_PostProcess     = LoadPixelShader("PyramidBlur_pp");
 	gGaussianBlurH_PostProcess    = LoadPixelShader("GaussianBlurHorizontal_pp");
 	gGaussianBlurV_PostProcess    = LoadPixelShader("GaussianBlurVertical_pp");
+	gCopy_PostProcess    = LoadPixelShader("Copy_pp");
 
 	gUnderwater_PostProcess         = LoadPixelShader ("Underwater_pp");
 	gNoise_PostProcess          = LoadPixelShader ("GreyNoise_pp");
@@ -80,6 +82,7 @@ bool LoadShaders()
 		|| gNoise_PostProcess          == nullptr
 		|| gGaussianBlurH_PostProcess == nullptr
 		|| gGaussianBlurV_PostProcess == nullptr
+		|| gCopy_PostProcess == nullptr
 		)
 	{
 		gLastError = "Error loading shaders";
@@ -98,6 +101,7 @@ void ReleaseShaders()
 	if (gPyramidBlur_PostProcess)       gPyramidBlur_PostProcess   ->Release();
 	if (gGaussianBlurH_PostProcess)     gGaussianBlurH_PostProcess ->Release();
 	if (gGaussianBlurV_PostProcess)     gGaussianBlurV_PostProcess ->Release();
+	if (gCopy_PostProcess)              gCopy_PostProcess          ->Release();
 	if (gTintPostProcess)               gTintPostProcess           ->Release();
 	if (gFullScreenQuadVertexShader)    gFullScreenQuadVertexShader->Release();
 	if (gPixelLightingPixelShader)      gPixelLightingPixelShader  ->Release();

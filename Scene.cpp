@@ -140,6 +140,11 @@ ID3D11RenderTargetView*   gSceneRenderTarget = nullptr; // This object is used w
 ID3D11ShaderResourceView* gSceneTextureSRV   = nullptr; // This object is used to give shaders access to the texture above (SRV = shader resource view)
 
 
+ID3D11Texture2D*          gPostProcessTexture      = nullptr; // This object represents the memory used by the texture on the GPU
+ID3D11RenderTargetView*   gPostProcessRenderTarget = nullptr; // This object is used when we want to render to the texture above
+ID3D11ShaderResourceView* gPostProcessTextureSRV   = nullptr; // This object is used to give shaders access to the texture above (SRV = shader resource view)
+
+
 // Additional textures used for specific post-processes
 ID3D11Resource*           gNoiseMap = nullptr;
 ID3D11ShaderResourceView* gNoiseMapSRV = nullptr;
@@ -258,10 +263,20 @@ bool InitGeometry()
 		gLastError = "Error creating scene texture";
 		return false;
 	}
+	if (FAILED(gD3DDevice->CreateTexture2D(&sceneTextureDesc, NULL, &gPostProcessTexture)))
+	{
+		gLastError = "Error creating scene texture";
+		return false;
+	}
 
 	// We created the scene texture above, now we get a "view" of it as a render target, i.e. get a special pointer to the texture that
 	// we use when rendering to it (see RenderScene function below)
 	if (FAILED(gD3DDevice->CreateRenderTargetView(gSceneTexture, NULL, &gSceneRenderTarget)))
+	{
+		gLastError = "Error creating scene render target view";
+		return false;
+	}
+	if (FAILED(gD3DDevice->CreateRenderTargetView(gPostProcessTexture, NULL, &gPostProcessRenderTarget)))
 	{
 		gLastError = "Error creating scene render target view";
 		return false;
@@ -274,6 +289,11 @@ bool InitGeometry()
 	srDesc.Texture2D.MostDetailedMip = 0;
 	srDesc.Texture2D.MipLevels = 1;
 	if (FAILED(gD3DDevice->CreateShaderResourceView(gSceneTexture, &srDesc, &gSceneTextureSRV)))
+	{
+		gLastError = "Error creating scene shader resource view";
+		return false;
+	}
+	if (FAILED(gD3DDevice->CreateShaderResourceView(gPostProcessTexture, &srDesc, &gPostProcessTextureSRV)))
 	{
 		gLastError = "Error creating scene shader resource view";
 		return false;
@@ -477,7 +497,7 @@ void RenderSceneFromCamera(Camera* camera)
 }
 
 //**************************
-
+bool skip = false;
 // Run any scene post-processing steps
 void PostProcessing(float frameTime)
 {
@@ -527,24 +547,53 @@ void PostProcessing(float frameTime)
 	}
 	else if (gCurrentPostProcess == PostProcess::GaussianBlur)
 	{
-		//tint variables
+		// the first shader should render to the postProcess Render Target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
+
+		// tint shader
 		gPostProcessingConstants.tintColour = { 0, 1, 1 };
 		gPostProcessingConstants.tintColour2 = { 1, 1, 0 };
-		//tint shader
 		gD3DContext->PSSetShader(gTintPostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); 
-		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use scene texture as input
+
+		// render
+		UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+		gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+		gD3DContext->Draw(4, 0);
+
+		// unbind SRV, ready for next render
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
 
 
-
-		// blur variables
+		// the second shader shoudl render ot the back buffer
+		gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
+		// blur shader
 		gPostProcessingConstants.blurBellcurveStrength = blurCurve;
 		gPostProcessingConstants.blurRadius = blurStrength;
-
-		// set blur shader
 		gD3DContext->PSSetShader(gGaussianBlurH_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
-		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+		gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV); // use postprocess texture as input
+
+		gD3DContext->Draw(4, 0);
+
+
+
+
+
+
+		skip = true;
+
+
+
+		//gD3DContext->PSSetShaderResources(slot, 1, pTexture0); // source
+		//gD3DContext->OMSetRenderTargets(1, pTexture1, 0);      // target
+		//gD3DContext->Draw(4,0);
+
+		//// Pass 2: from pTexture1 to pTexture2
+		//// ...set up pipeline state for Pass1 here...
+		//gD3DContext->PSSetShaderResources(slot, 1, pTexture1); // previous target is now source
+		//gD3DContext->OMSetRenderTargets(1, pTexture2, 0);
+		//gD3DContext->Draw(4,0);
 
 
 
@@ -621,7 +670,6 @@ void PostProcessing(float frameTime)
 	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
 	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
 
-	// Draw a quad
 	gD3DContext->Draw( 4, 0);
 
 

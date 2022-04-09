@@ -125,11 +125,12 @@ struct PostProcessingConstants
 
 	//retro
 	CVector2 noiseScale;
-	CVector2 noiseOffset;
+	float paddngj;
+	float bitColour;
 
 	float blurRadius;
 	float blurBellcurveStrength;
-	float paddingb;
+	float brightFilterThreshold;
 	float paddingc;
 
 

@@ -28,10 +28,10 @@ void ReleaseResources();
 
 void RenderScene(float frameTime);
 
-void RenderAndReset();
 
 // frameTime is the time passed since the last frame
 void UpdateScene(float frameTime);
+
 
 
 

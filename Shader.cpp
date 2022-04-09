@@ -33,9 +33,12 @@ ID3D11PixelShader*  gPyramidBlur_PostProcess = nullptr;
 ID3D11PixelShader*  gGaussianBlurH_PostProcess = nullptr;
 ID3D11PixelShader*  gGaussianBlurV_PostProcess = nullptr;
 ID3D11PixelShader*  gCopy_PostProcess = nullptr;
-
+ID3D11PixelShader*  gPixellate_PostProcess = nullptr;
+ID3D11PixelShader*  gBitColour_PostProcess = nullptr;
+ID3D11PixelShader*  gBrightFilter_PostProcess = nullptr;
 ID3D11PixelShader*  gUnderwater_PostProcess = nullptr;
 ID3D11PixelShader*  gNoise_PostProcess = nullptr;
+ID3D11PixelShader*  gCombine_PostProcess = nullptr;
 
 
 
@@ -65,6 +68,10 @@ bool LoadShaders()
 	gGaussianBlurH_PostProcess    = LoadPixelShader("GaussianBlurHorizontal_pp");
 	gGaussianBlurV_PostProcess    = LoadPixelShader("GaussianBlurVertical_pp");
 	gCopy_PostProcess    = LoadPixelShader("Copy_pp");
+	gPixellate_PostProcess    = LoadPixelShader("Retro_pp");
+	gBitColour_PostProcess    = LoadPixelShader("BitColour_pp");
+	gBrightFilter_PostProcess = LoadPixelShader("BrightFilter_pp");
+	gCombine_PostProcess = LoadPixelShader("CombineAdditive_pp");
 
 	gUnderwater_PostProcess         = LoadPixelShader ("Underwater_pp");
 	gNoise_PostProcess          = LoadPixelShader ("GreyNoise_pp");
@@ -83,6 +90,10 @@ bool LoadShaders()
 		|| gGaussianBlurH_PostProcess == nullptr
 		|| gGaussianBlurV_PostProcess == nullptr
 		|| gCopy_PostProcess == nullptr
+		|| gPixellate_PostProcess == nullptr
+		|| gBitColour_PostProcess == nullptr
+		|| gBrightFilter_PostProcess == nullptr
+		|| gCombine_PostProcess == nullptr
 		)
 	{
 		gLastError = "Error loading shaders";
@@ -108,6 +119,10 @@ void ReleaseShaders()
 	if (gTintedTexturePixelShader)      gTintedTexturePixelShader  ->Release();
 	if (gPixelLightingVertexShader)     gPixelLightingVertexShader ->Release();
 	if (gBasicTransformVertexShader)    gBasicTransformVertexShader->Release();
+	if (gPixellate_PostProcess)			gPixellate_PostProcess->Release();
+	if (gBitColour_PostProcess)			gBitColour_PostProcess->Release();
+	if (gBrightFilter_PostProcess)		gBrightFilter_PostProcess->Release();
+	if (gCombine_PostProcess)			gCombine_PostProcess->Release();
 }
 
 

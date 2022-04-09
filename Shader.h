@@ -32,6 +32,10 @@ extern ID3D11PixelShader*  gCopy_PostProcess;
 extern ID3D11PixelShader*  gGaussianBlurV_PostProcess;
 extern ID3D11PixelShader*  gUnderwater_PostProcess;
 extern ID3D11PixelShader*  gNoise_PostProcess;
+extern ID3D11PixelShader*  gPixellate_PostProcess;
+extern ID3D11PixelShader* gBitColour_PostProcess;
+extern ID3D11PixelShader* gBrightFilter_PostProcess;
+extern ID3D11PixelShader* gCombine_PostProcess;
 
 
 //--------------------------------------------------------------------------------------

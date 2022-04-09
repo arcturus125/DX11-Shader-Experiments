@@ -132,14 +132,19 @@ ID3D11ShaderResourceView* gLightDiffuseMapSRV = nullptr;
 // Post processing textures
 
 // This texture will have the scene renderered on it. Then the texture is then used for post-processing
-ID3D11Texture2D*          gSceneTexture      = nullptr; // This object represents the memory used by the texture on the GPU
-ID3D11RenderTargetView*   gSceneRenderTarget = nullptr; // This object is used when we want to render to the texture above
-ID3D11ShaderResourceView* gSceneTextureSRV   = nullptr; // This object is used to give shaders access to the texture above (SRV = shader resource view)
+ID3D11Texture2D*          gSceneTexture      = nullptr; // 2d texture
+ID3D11RenderTargetView*   gSceneRenderTarget = nullptr; // a reference to the above texture that can be rendered to
+ID3D11ShaderResourceView* gSceneTextureSRV   = nullptr; // a reference to the above texture that can be passed to shaders
 
+// a texture used for most post processing
+ID3D11Texture2D*          gPostProcessTexture      = nullptr;
+ID3D11RenderTargetView*   gPostProcessRenderTarget = nullptr;
+ID3D11ShaderResourceView* gPostProcessTextureSRV   = nullptr;
 
-ID3D11Texture2D*          gPostProcessTexture      = nullptr; // This object represents the memory used by the texture on the GPU
-ID3D11RenderTargetView*   gPostProcessRenderTarget = nullptr; // This object is used when we want to render to the texture above
-ID3D11ShaderResourceView* gPostProcessTextureSRV   = nullptr; // This object is used to give shaders access to the texture above (SRV = shader resource view)
+// a secondary post processing texture used for bloom
+ID3D11Texture2D*          gBloomTexture      = nullptr; 
+ID3D11RenderTargetView*   gBloomRenderTarget = nullptr; 
+ID3D11ShaderResourceView* gBloomTextureSRV   = nullptr; 
 
 
 // Additional textures used for specific post-processes
@@ -156,12 +161,16 @@ ID3D11ShaderResourceView* gDistortMapSRV = nullptr;
 
 float blurStrength = 50;
 float blurCurve = 0.03f;
-float timer = 0;
+float timer = 0; 
+float bitColour = 90;
+float pixelSize = 10;
 
 bool Tint;
 bool Blur;
 bool GaussianBlur;
 bool Underwater;
+bool Retro;
+bool Bloom;
 
 
 
@@ -410,6 +419,11 @@ bool InitGeometry()
 		gLastError = "Error creating scene texture";
 		return false;
 	}
+	if (FAILED(gD3DDevice->CreateTexture2D(&sceneTextureDesc, NULL, &gBloomTexture)))
+	{
+		gLastError = "Error creating scene texture";
+		return false;
+	}
 
 	// We created the scene texture above, now we get a "view" of it as a render target, i.e. get a special pointer to the texture that
 	// we use when rendering to it (see RenderScene function below)
@@ -419,6 +433,11 @@ bool InitGeometry()
 		return false;
 	}
 	if (FAILED(gD3DDevice->CreateRenderTargetView(gPostProcessTexture, NULL, &gPostProcessRenderTarget)))
+	{
+		gLastError = "Error creating scene render target view";
+		return false;
+	}
+	if (FAILED(gD3DDevice->CreateRenderTargetView(gBloomTexture, NULL, &gBloomRenderTarget)))
 	{
 		gLastError = "Error creating scene render target view";
 		return false;
@@ -440,20 +459,22 @@ bool InitGeometry()
 		gLastError = "Error creating scene shader resource view";
 		return false;
 	}
+	if (FAILED(gD3DDevice->CreateShaderResourceView(gBloomTexture, &srDesc, &gBloomTextureSRV)))
+	{
+		gLastError = "Error creating scene shader resource view";
+		return false;
+	}
 
 
 	return true;
 }
-
-
-// Prepare the scene
-// Returns true on success
 bool InitScene()
 {
 	Tint = false;
 	Blur = false;
 	GaussianBlur = false;
 	Underwater = false;
+	Retro = false;
 
 	////--------------- Set up scene ---------------////
 
@@ -497,9 +518,6 @@ bool InitScene()
 
 	return true;
 }
-
-
-// Release the geometry and scene resources created above
 void ReleaseResources()
 {
 	ReleaseStates();
@@ -644,28 +662,29 @@ void RenderSceneFromCamera(Camera* camera)
 }
 
 //**************************
-bool skip = false;
+
 
 
 //this function calls the Draw() function to render the quad, but also switches the textures.
 void RenderAndReset()
 {
-	// ########### render and reset ############
+	// ########### render to texture ############
 	//update buffers before rendering (so that shaders get up to date values)
 	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
 	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
-	// draw the quad
+	// draw the quad -- run the shaders
 	gD3DContext->Draw(4, 0);
 	// unbind SRV, ready for next render
 	ID3D11ShaderResourceView* nullSRV = nullptr;
 	gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
 	//###########################################
 
-	//copy back
+	// copy post process texture back to the scene texture
 	gD3DContext->OMSetRenderTargets(1, &gSceneRenderTarget, gDepthStencil);
 	gD3DContext->PSSetShader(gCopy_PostProcess, nullptr, 0);
-	gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV); // use postprocess texture as input
+	gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV);
 
+	// ########### render to texture ############ (same as above)
 	//update buffers before rendering (so that shaders get up to date values)
 	UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
 	gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
@@ -673,6 +692,7 @@ void RenderAndReset()
 	gD3DContext->Draw(4, 0);
 	// unbind SRV, ready for next render
 	gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+	//###########################################
 }
 
 // Run any scene post-processing steps
@@ -680,37 +700,24 @@ void PostProcessing(float frameTime)
 {
 	timer += frameTime;
 
-	// Select the back buffer to use for rendering. Not going to clear the back-buffer because we're going to overwrite it all
-	//gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
-
-	
-	// Give the pixel shader (post-processing shader) access to the scene texture 
-	//gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
-	//gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
-
-
 	// Using special vertex shader than creates its own data for a full screen quad
 	gD3DContext->VSSetShader(gFullScreenQuadVertexShader, nullptr, 0);
 	gD3DContext->GSSetShader(nullptr, nullptr, 0);  // Switch off geometry shader when not using it (pass nullptr for first parameter)
-
 
 	// States - no blending, ignore depth buffer and culling
 	gD3DContext->OMSetBlendState(gNoBlendingState, nullptr, 0xffffff);
 	gD3DContext->OMSetDepthStencilState(gNoDepthBufferState, 0);
 	gD3DContext->RSSetState(gCullNoneState);
 
-
 	// No need to set vertex/index buffer (see fullscreen quad vertex shader), just indicate that the quad will be created as a triangle strip
 	gD3DContext->IASetInputLayout(NULL); // No vertex data
 	gD3DContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-
-
 
 	gPostProcessingConstants.blurBellcurveStrength = blurCurve;
 	gPostProcessingConstants.blurRadius = blurStrength;
 	
 	// Prepare custom settings for current post-process
-	if (Tint == true)
+	if (Tint)
 	{
 		// choose render target
 		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
@@ -790,24 +797,104 @@ void PostProcessing(float frameTime)
 		RenderAndReset();
 
 	}
-
-
-	if (gCurrentPostProcess == PostProcess::Retro)
+	if (Retro)
 	{
+		// choose render target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
-		gD3DContext->PSSetShader(gNoise_PostProcess, nullptr, 0);
-		// Noise scaling adjusts how fine the noise is.
-		const float grainSize = 500; // Fineness of the noise grain
-		gPostProcessingConstants.noiseScale = { gViewportWidth / grainSize, gViewportHeight / grainSize };
+		//shader settings
+		gPostProcessingConstants.noiseScale = { pixelSize, pixelSize };
 
-		//// The noise offset is randomised to give a constantly changing noise effect (like tv static)
-		gPostProcessingConstants.noiseOffset = { Random(0.0f, 1.0f), Random(0.0f, 1.0f) };
-		//gPostProcessingConstants.noiseOffset = { /*FILTER - 2 random UVs please*/ };
+		//pixellate
+		gD3DContext->PSSetShader(gPixellate_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
-		//// Give pixel shader access to the noise texture
-		gD3DContext->PSSetShaderResources(1, 1, &gNoiseMapSRV);
-		gD3DContext->PSSetSamplers(1, 1, &gTrilinearSampler);
+		RenderAndReset();
+
+
+		// choose render target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
+
+		gPostProcessingConstants.bitColour = bitColour;
+		//bitColour
+		gD3DContext->PSSetShader(gBitColour_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+		RenderAndReset();
+
 	}
+	if (Bloom)
+	{
+		// render to the bloom texture
+		gD3DContext->OMSetRenderTargets(1, &gBloomRenderTarget, gDepthStencil); //render to bloom texture
+																				//   ^
+		gPostProcessingConstants.brightFilterThreshold = 0.7f;					//   |
+		//shader																//   |
+		gD3DContext->PSSetShader(gBrightFilter_PostProcess, nullptr, 0);		//   |
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);				// render from scene
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+
+			// ########### Draw and reset - no copy  ############
+			UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+			gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+			gD3DContext->Draw(4, 0);
+			ID3D11ShaderResourceView* nullSRV = nullptr;
+			gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+			//###########################################
+
+
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);	// render to post process
+																						//  ^
+		// blur Horizontally shader														//  |
+		gPostProcessingConstants.blurBellcurveStrength = blurCurve;						//  |
+		gPostProcessingConstants.blurRadius = blurStrength;								//  |
+																						//  |
+		//blur																			//  |
+		gD3DContext->PSSetShader(gGaussianBlurH_PostProcess, nullptr, 0);				//  |
+		gD3DContext->PSSetShaderResources(0, 1, &gBloomTextureSRV);						// render from bloom
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+
+			// ########### Draw and reset - no copy  ############
+			UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+			gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+			gD3DContext->Draw(4, 0);
+			gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+			//###########################################
+
+		gD3DContext->OMSetRenderTargets(1, &gBloomRenderTarget, gDepthStencil);		// render to bloom texture
+																					//  ^
+		// blur Vertically shader													//  |
+		gD3DContext->PSSetShader(gGaussianBlurV_PostProcess, nullptr, 0);			//  |
+		gD3DContext->PSSetShaderResources(0, 1, &gPostProcessTextureSRV);			// render from  post process
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+			// ########### Draw and reset - no copy  ############
+			UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
+			gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+			gD3DContext->Draw(4, 0);
+			gD3DContext->PSSetShaderResources(0, 1, &nullSRV);
+			//###########################################
+
+		// combine
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);		// render to postProcess
+
+		// combine shader											
+		gD3DContext->PSSetShader(gCombine_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gBloomTextureSRV);							// combine textures from
+		gD3DContext->PSSetShaderResources(1, 1, &gSceneTextureSRV);							//  bloom and scene
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+
+
+		RenderAndReset();
+	}
+
+
+
 	else if (gCurrentPostProcess == PostProcess::Spiral)
 	{
 		gD3DContext->PSSetShader(gNoise_PostProcess, nullptr, 0);
@@ -880,7 +967,9 @@ void RenderScene(float frameTime)
 		|| Tint
 		|| Blur
 		|| GaussianBlur
-		|| Underwater)
+		|| Underwater
+		|| Retro
+		|| Bloom)
 	{
 		gD3DContext->OMSetRenderTargets(1, &gSceneRenderTarget, gDepthStencil);
 		gD3DContext->ClearRenderTargetView(gSceneRenderTarget, &gBackgroundColor.r);
@@ -912,7 +1001,9 @@ void RenderScene(float frameTime)
 	if (gCurrentPostProcess != PostProcess::None || Tint
 		|| Blur
 		|| GaussianBlur
-		|| Underwater)  
+		|| Underwater
+		|| Retro
+		|| Bloom)  
 		PostProcessing(frameTime);
 
 	// When drawing to the off-screen back buffer is complete, we "present" the image to the front buffer (the screen)
@@ -939,8 +1030,10 @@ void UpdateScene(float frameTime)
 	if (KeyHit(Key_F1))  Blur = !Blur;
 	if (KeyHit(Key_2))   GaussianBlur = !GaussianBlur;
 	if (KeyHit(Key_3))   Underwater = !Underwater;
+	if (KeyHit(Key_4))   Retro = !Retro;
+	if (KeyHit(Key_5))   Bloom = !Bloom;
 
-	//if (KeyHit(Key_4))  gCurrentPostProcess = PostProcess::Retro;
+
 	//if (KeyHit(Key_5))  gCurrentPostProcess = PostProcess::Spiral;
 	if (KeyHit(Key_0))  gCurrentPostProcess = PostProcess::None;
 
@@ -950,6 +1043,17 @@ void UpdateScene(float frameTime)
 
 	if (KeyHeld(Key_K)) blurCurve /= 1.1f;
 	if (KeyHeld(Key_L)) blurCurve *= 1.1f;
+
+
+	if (KeyHeld(Key_V)) bitColour--;
+	if (bitColour < 1) bitColour = 1;
+	if (KeyHeld(Key_B)) bitColour++;
+
+
+
+	if (KeyHeld(Key_F)) pixelSize--;
+	if (pixelSize < 1) pixelSize = 1;
+	if (KeyHeld(Key_G)) pixelSize++;
 
 	// Orbit one light - a bit of a cheat with the static variable [ask the tutor if you want to know what this is]
 	static float lightRotate = 0.0f;

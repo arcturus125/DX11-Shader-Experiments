@@ -134,12 +134,13 @@ cbuffer PostProcessingConstants : register(b1)
 	float hWave;
     
     //retro
-    float2 gNoiseScale;
-    float2 gNoiseOffset;
+	float2 gNoiseScale;
+	float paddngj;
+	float bitColour;
     
 	float blurRadius;
 	float blurBellcurveStrength;
-	float paddingb;
+	float brightFilterThreshold;
 	float paddingc;
 
 	// Distort post-process settings

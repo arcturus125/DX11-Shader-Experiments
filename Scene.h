@@ -34,4 +34,5 @@ void RenderAndReset();
 void UpdateScene(float frameTime);
 
 
+
 #endif //_SCENE_H_INCLUDED_

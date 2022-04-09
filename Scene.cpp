@@ -21,6 +21,7 @@
 
 #include <sstream>
 #include <memory>
+#include <iostream>
 
 
 //--------------------------------------------------------------------------------------
@@ -32,12 +33,8 @@
 enum class PostProcess
 {
 	None,
-	Tint,
 	PyramidBlur,
-	GaussianBlur,
-	Blur,
 	Retro,
-	Underwater,
 	Spiral,
 };
 
@@ -157,9 +154,16 @@ ID3D11ShaderResourceView* gDistortMapSRV = nullptr;
 //****************************
 
 
-float blurStrength = 10;
-float blurCurve = 1;
+float blurStrength = 50;
+float blurCurve = 0.03f;
 float timer = 0;
+
+bool Tint;
+bool Blur;
+bool GaussianBlur;
+bool Underwater;
+
+
 
 //--------------------------------------------------------------------------------------
 // Initialise scene geometry, constant buffers and states
@@ -167,6 +171,144 @@ float timer = 0;
 
 // Prepare the geometry required for the scene
 // Returns true on success
+
+float Min(float f1, float f2, float f3)
+{
+	float fMin = f1;
+	if (f2 < fMin)
+	{
+		fMin = f2;
+	}
+	if (f3 < fMin)
+	{
+		fMin = f3;
+	}
+	return fMin;
+}
+float Max(float f1, float f2, float f3)
+{
+	float fMax = f1;
+	if (f2 > fMax)
+	{
+		fMax = f2;
+	}
+	if (f3 > fMax)
+	{
+		fMax = f3;
+	}
+	return fMax;
+}
+
+// Convert an RGB colour to a HSL colour
+CVector3 RGBToHSL(CVector3 rgb)
+{
+	float fR = rgb.x;
+	float fB = rgb.y;
+	float fG = rgb.z;
+
+	float min = Min(fR, fB, fG);
+	float max = Max(fR, fB, fG);
+
+	float H;
+	float S;
+	float L;
+
+	L = 50 * (max + min);
+	if (min == max)
+	{
+		S = H = 0; 
+		return CVector3(H, S, L);
+	}
+	else if (L < 50)
+	{
+		S = 100 * (max - min) / (max + min);
+	}
+	else
+	{
+		S = 100 * (max - min) / (2.0 - max - min);
+	}
+	if (max == fR) H = 60 * (fG - fB) / (max - min);
+	else if (max == fG) H = 60 * (fB - fR) / (max - min) + 120;
+	else if (max == fB) H = 60 * (fR - fG) / (max - min) + 240;
+
+	if (H < 0) H = H + 360;
+
+	return CVector3(H, S, L);
+}
+CVector3 HSLToRGB(CVector3 hsl)
+{
+	int H = hsl.x; 
+	int S = hsl.y; 
+	int L = hsl.z;
+
+	// Fill in the correct code here for question 7 (advanced)
+	float St = S / 100.0f;
+	float Lt = L / 100.0f;
+
+	// calculate C
+	float C = (1.0f - fabs(2.0f * Lt - 1.0f)) * St;
+
+	//calculate X
+	float X = C * (1.0f - fabs(fmodf(H / 60.0f, 2.0f) - 1.0f));
+
+	//calculate m
+	float m = Lt - (C / 2.0f);
+
+	float Rt = 0;
+	float Gt = 0;
+	float Bt = 0;
+
+	if (H >= 0 && H < 60)
+	{
+		Rt = C;
+		Gt = X;
+		Bt = 0;
+	}
+	else if (H >= 60 && H < 120)
+	{
+		Rt = X;
+		Gt = C;
+		Bt = 0;
+	}
+	else if (H >= 120 && H < 180)
+	{
+		Rt = 0;
+		Gt = C;
+		Bt = X;
+	}
+	else if (H >= 180 && H < 240)
+	{
+		Rt = 0;
+		Gt = X;
+		Bt = C;
+	}
+	else if (H >= 240 && H < 300)
+	{
+		Rt = X;
+		Gt = 0;
+		Bt = C;
+	}
+	else if (H >= 300 && H < 360)
+	{
+		Rt = C;
+		Gt = 0;
+		Bt = X;
+	}
+
+
+	float R = (Rt + m);
+	float G = (Gt + m);
+	float B = (Bt + m);
+
+	return CVector3(R,G,B);
+
+}
+
+
+CVector3 tintColour =  RGBToHSL({ 0, 1, 1 });
+CVector3 tintColour2 = RGBToHSL({ 1, 1, 0 });
+
+
 bool InitGeometry()
 {
 	////--------------- Load meshes ---------------////
@@ -308,6 +450,11 @@ bool InitGeometry()
 // Returns true on success
 bool InitScene()
 {
+	Tint = false;
+	Blur = false;
+	GaussianBlur = false;
+	Underwater = false;
+
 	////--------------- Set up scene ---------------////
 
 	gStars  = new Model(gStarsMesh);
@@ -534,12 +681,12 @@ void PostProcessing(float frameTime)
 	timer += frameTime;
 
 	// Select the back buffer to use for rendering. Not going to clear the back-buffer because we're going to overwrite it all
-	gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
+	//gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
 
 	
 	// Give the pixel shader (post-processing shader) access to the scene texture 
-	gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
-	gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+	//gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+	//gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
 
 	// Using special vertex shader than creates its own data for a full screen quad
@@ -563,125 +710,103 @@ void PostProcessing(float frameTime)
 	gPostProcessingConstants.blurRadius = blurStrength;
 	
 	// Prepare custom settings for current post-process
-	if (gCurrentPostProcess == PostProcess::Tint)
+	if (Tint == true)
 	{
+		// choose render target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
+
+		//shader settings
+		gPostProcessingConstants.tintColour = HSLToRGB(tintColour);
+		gPostProcessingConstants.tintColour2 = HSLToRGB(tintColour2);
+
+		//shader
 		gD3DContext->PSSetShader(gTintPostProcess, nullptr, 0);
-		gPostProcessingConstants.tintColour = { 0, 1, 1 };
-		gPostProcessingConstants.tintColour2 = { 1, 1, 0 };
-	}
-	else if (gCurrentPostProcess == PostProcess::PyramidBlur)
-	{
-		gD3DContext->PSSetShader(gPyramidBlur_PostProcess, nullptr, 0);
 		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
 		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+
+		RenderAndReset();
 	}
-	else if (gCurrentPostProcess == PostProcess::GaussianBlur)
+	if (GaussianBlur)
 	{
-		// the first shader
+		// the first pass - blur horizontally
 		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
-		// blur vertically shader
+		// blur Horizontally shader
 		gPostProcessingConstants.blurBellcurveStrength = blurCurve;
 		gPostProcessingConstants.blurRadius = blurStrength;
-		gD3DContext->PSSetShader(gGaussianBlurV_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(1, 1, &gSceneTextureSRV);
-		gD3DContext->PSSetSamplers(1, 1, &gPointSampler);
+
+		//blur
+		gD3DContext->PSSetShader(gGaussianBlurH_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
 
 		RenderAndReset();
 
-		// the second shader
+		// the second pass - blur vertically
 		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
-		// blur horizontally shader
-		gD3DContext->PSSetShader(gGaussianBlurH_PostProcess, nullptr, 0);
+		// blur Vertically shader
+		gD3DContext->PSSetShader(gGaussianBlurV_PostProcess, nullptr, 0);
 		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use postprocess texture as input
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
 		RenderAndReset();
 
+	}
+	if (Blur)
+	{
+		// choose render target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
+		// blur settings
+		gPostProcessingConstants.blurBellcurveStrength = blurCurve;
+		gPostProcessingConstants.blurRadius = blurStrength;
 
-		//copy to back buffet
-		gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
-		gD3DContext->PSSetShader(gCopy_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV); // use postprocess texture as input
+		// blur
+		gD3DContext->PSSetShader(gBlur_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
+		RenderAndReset();
+	}
+	if (Underwater)
+	{
+		// choose render target
+		gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
+		// underwater settings
+		gPostProcessingConstants.waterTintColour = { 0, 1, 1 };
+		gPostProcessingConstants.waterTintColour2 = { 0, 0.5, 1 };
+		gPostProcessingConstants.hWave = timer;
+		gPostProcessingConstants.vWave = timer / 2;
 
+		// underwater shader
+		gD3DContext->PSSetShader(gUnderwater_PostProcess, nullptr, 0);
+		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
 
+		RenderAndReset();
 
-
-
-
-		gD3DContext->Draw(4, 0);
-
-
-
-
-
-
-
-
-		skip = true;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-		/*gD3DContext->PSSetShader(gGaussianBlurV_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(1, 1, &gSceneTextureSRV);
-		gD3DContext->PSSetSamplers(1, 1, &gPointSampler);*/
 	}
 
 
-	else if (gCurrentPostProcess == PostProcess::Retro)
+	if (gCurrentPostProcess == PostProcess::Retro)
 	{
 
 		gD3DContext->PSSetShader(gNoise_PostProcess, nullptr, 0);
 		// Noise scaling adjusts how fine the noise is.
 		const float grainSize = 500; // Fineness of the noise grain
-		gPostProcessingConstants.noiseScale  = { gViewportWidth / grainSize, gViewportHeight / grainSize };
+		gPostProcessingConstants.noiseScale = { gViewportWidth / grainSize, gViewportHeight / grainSize };
 
 		//// The noise offset is randomised to give a constantly changing noise effect (like tv static)
 		gPostProcessingConstants.noiseOffset = { Random(0.0f, 1.0f), Random(0.0f, 1.0f) };
-	    //gPostProcessingConstants.noiseOffset = { /*FILTER - 2 random UVs please*/ };
+		//gPostProcessingConstants.noiseOffset = { /*FILTER - 2 random UVs please*/ };
 
 		//// Give pixel shader access to the noise texture
 		gD3DContext->PSSetShaderResources(1, 1, &gNoiseMapSRV);
 		gD3DContext->PSSetSamplers(1, 1, &gTrilinearSampler);
-	}
-	else if (gCurrentPostProcess == PostProcess::Blur)
-	{
-		gD3DContext->PSSetShader(gBlur_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
-		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
-	}
-	else if (gCurrentPostProcess == PostProcess::Underwater)
-	{
-		gD3DContext->PSSetShader(gUnderwater_PostProcess, nullptr, 0);
-		gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
-		gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
-
-		gPostProcessingConstants.waterTintColour = { 0, 1, 1 };
-		gPostProcessingConstants.waterTintColour2 = { 0, 0.5, 1 };
-		gPostProcessingConstants.hWave = timer;
-		gPostProcessingConstants.vWave = timer/2;
-
-		//// Set the level of distortion
-		//gPostProcessingConstants.distortLevel = 0.03f;
-
-		//// Give pixel shader access to the distortion texture (containts 2D vectors (in R & G) to shift the texture UVs to give a cut-glass impression)
-		//gD3DContext->PSSetShaderResources(1, 1, &gDistortMapSRV);
-		//gD3DContext->PSSetSamplers(1, 1, &gTrilinearSampler);
 	}
 	else if (gCurrentPostProcess == PostProcess::Spiral)
 	{
@@ -694,14 +819,24 @@ void PostProcessing(float frameTime)
 		gPostProcessingConstants.spiralLevel = ((1.0f - cos(wiggle)) * 4.0f );
 		wiggle += wiggleSpeed * frameTime;
 	}
-
-	if (skip == false)
+	else if (gCurrentPostProcess == PostProcess::PyramidBlur)
 	{
-		UpdateConstantBuffer(gPostProcessingConstantBuffer, gPostProcessingConstants);
-		gD3DContext->PSSetConstantBuffers(1, 1, &gPostProcessingConstantBuffer);
+	// choose render target
+	gD3DContext->OMSetRenderTargets(1, &gPostProcessRenderTarget, gDepthStencil);
 
-		gD3DContext->Draw(4, 0);
+	gD3DContext->PSSetShader(gPyramidBlur_PostProcess, nullptr, 0);
+	gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+	gD3DContext->PSSetSamplers(0, 1, &gPointSampler);
+
+	RenderAndReset();
 	}
+
+	//copy to back buffer
+	gD3DContext->OMSetRenderTargets(1, &gBackBufferRenderTarget, gDepthStencil);
+	gD3DContext->PSSetShader(gCopy_PostProcess, nullptr, 0);
+	gD3DContext->PSSetShaderResources(0, 1, &gSceneTextureSRV);
+
+	gD3DContext->Draw(4, 0);
 
 
 	// These lines unbind the scene texture from the pixel shader to stop DirectX issuing a warning when we try to render to it again next frame
@@ -741,7 +876,11 @@ void RenderScene(float frameTime)
 	// Set the target for rendering and select the main depth buffer.
 	// If using post-processing then render to the scene texture, otherwise to the usual back buffer
 	// Also clear the render target to a fixed colour and the depth buffer to the far distance
-	if (gCurrentPostProcess != PostProcess::None)
+	if (gCurrentPostProcess != PostProcess::None
+		|| Tint
+		|| Blur
+		|| GaussianBlur
+		|| Underwater)
 	{
 		gD3DContext->OMSetRenderTargets(1, &gSceneRenderTarget, gDepthStencil);
 		gD3DContext->ClearRenderTargetView(gSceneRenderTarget, &gBackgroundColor.r);
@@ -770,7 +909,11 @@ void RenderScene(float frameTime)
 	////--------------- Scene completion ---------------////
 
 	// Run any post-processing steps
-	if (gCurrentPostProcess != PostProcess::None)  PostProcessing(frameTime);
+	if (gCurrentPostProcess != PostProcess::None || Tint
+		|| Blur
+		|| GaussianBlur
+		|| Underwater)  
+		PostProcessing(frameTime);
 
 	// When drawing to the off-screen back buffer is complete, we "present" the image to the front buffer (the screen)
 	// Set first parameter to 1 to lock to vsync
@@ -785,22 +928,28 @@ void RenderScene(float frameTime)
 // Update models and camera. frameTime is the time passed since the last frame
 void UpdateScene(float frameTime)
 {
+	tintColour.x += frameTime * 20;
+	if (tintColour.x > 360) tintColour.x = 0;
+	tintColour2.x += (frameTime*50);
+	if (tintColour2.x > 360) tintColour2.x = 0;
+
+
 	// Select post process on keys
-	if (KeyHit(Key_1))  gCurrentPostProcess = PostProcess::Tint;
-	if (KeyHit(Key_2))  gCurrentPostProcess = PostProcess::PyramidBlur;
-	if (KeyHit(Key_3))  gCurrentPostProcess = PostProcess::Blur;
-	if (KeyHit(Key_4))  gCurrentPostProcess = PostProcess::GaussianBlur;
-	if (KeyHit(Key_5))  gCurrentPostProcess = PostProcess::Underwater;
+	if (KeyHit(Key_1))   Tint = !Tint;
+	if (KeyHit(Key_F1))  Blur = !Blur;
+	if (KeyHit(Key_2))   GaussianBlur = !GaussianBlur;
+	if (KeyHit(Key_3))   Underwater = !Underwater;
 
 	//if (KeyHit(Key_4))  gCurrentPostProcess = PostProcess::Retro;
 	//if (KeyHit(Key_5))  gCurrentPostProcess = PostProcess::Spiral;
 	if (KeyHit(Key_0))  gCurrentPostProcess = PostProcess::None;
 
-	if (KeyHit(Key_Comma)) blurStrength--;
-	if (KeyHit(Key_Period)) blurStrength++;
+	if (KeyHeld(Key_Comma)) blurStrength--;
+	if (KeyHeld(Key_Period)) blurStrength++;
+	if (blurStrength < 5) blurStrength = 5;
 
-	if (KeyHit(Key_K) && blurCurve > 0) blurCurve--;
-	if (KeyHit(Key_L)) blurCurve++;
+	if (KeyHeld(Key_K)) blurCurve /= 1.1f;
+	if (KeyHeld(Key_L)) blurCurve *= 1.1f;
 
 	// Orbit one light - a bit of a cheat with the static variable [ask the tutor if you want to know what this is]
 	static float lightRotate = 0.0f;

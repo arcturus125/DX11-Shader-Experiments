@@ -16,20 +16,22 @@ SamplerState PointSample : register(s0); // We don't usually want to filter (bil
 //--------------------------------------------------------------------------------------
 
 
-float gaussianCurve(float c, float x)
+// See this desmos graph i made to test this function
+// https://www.desmos.com/calculator/p1s5w5wkjc
+float gaussianCurve(float x)
 {
 	//eulers number
 	const float e = 2.71828182846;
+	const float pi = 3.142f;
+	// standard deviation
+	float c = blurBellcurveStrength;
 	
-	float a = 1;
-	float b = 0;
+	float cSquared = c * c;
 	
-	//float fraction = ((x - b) * (x - b)) / (c * c * 2);
-	float fraction = pow(x - b, 2) / pow(2*c, 2);
-	
-	return pow(a*e, -fraction);
+	return (1 / sqrt(2 * pi * cSquared)) * pow(e, -(x * x) / 2 * cSquared);
 
 }
+
 
 
 // Post-processing shader that tints the scene texture to a given colour
@@ -44,17 +46,31 @@ float4 main(PostProcessingInput input) : SV_Target
 	
 	
 	
-	float3 colour = 0;
-	int i = 0;
+	float3 colour = 0;  //SceneTexture.Sample(PointSample, input.uv).rgb;
 	
-	for (int x = -blurRadius; x <= blurRadius; x++)
+	//int i = 0;
+	//for (int x = -blurRadius; x <= blurRadius; x++)
+	//{
+	//	float2 pos = input.uv + float2(w * x, 0);
+	//	float multiplier = gaussianCurveTest(x);
+	//	colour += (SceneTexture.Sample(PointSample, pos).rgb * multiplier);
+	//	i += multiplier;
+	//}
+	//colour /= i;
+	
+	int m = 0;
+	double half_size = (blurRadius - 1) / 2.0;
+	for (int i = 0; i < blurRadius; ++i)
 	{
+		double x = i - half_size;
 		float2 pos = input.uv + float2(w * x, 0);
-		float multiplier = gaussianCurve(blurBellcurveStrength,1/x);
+		float multiplier = gaussianCurve(x);
 		colour += (SceneTexture.Sample(PointSample, pos).rgb * multiplier);
-		i += multiplier;
+		m += multiplier;
+
 	}
-	colour = colour / i;
+	colour /= m;
+	
 	
 	
 	return float4(colour, 1.0f);
